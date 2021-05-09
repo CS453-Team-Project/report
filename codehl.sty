@@ -1,0 +1,40 @@
+\RequirePackage{minted}
+\RequirePackage{fontspec}
+\RequirePackage{xpatch}
+\RequirePackage[many,minted]{tcolorbox}
+
+\usemintedstyle{manni}
+
+\setmonofont[Path=fonts/,BoldFont={Inconsolata-Bold.ttf}]{Inconsolata-Regular.ttf}
+
+\newcommand{\mynewminted}[3]{%
+\newminted[#1]{#2}{#3}%
+\tcbset{myminted/#1/.style={minted language=#2,minted options={#3}}}}
+
+\definecolor{textcolor}{HTML}{010101}
+\definecolor{stringcolor}{HTML}{039c43}
+\definecolor{commentcolor}{HTML}{999999}
+\definecolor{numbercolor}{HTML}{308ce5}
+\definecolor{keywordcolor}{HTML}{ff3399}
+\definecolor{variablecolor}{HTML}{0086b3}
+\definecolor{bgcolor}{HTML}{f7f7f7}
+
+\newtcblisting[auto counter,
+list inside=mypyg]{listingsbox}[3][]{%
+listing only,
+colback=bgcolor,
+title={\small\sffamily\textcolor{textcolor!80!white}{Code \thetcbcounter: #3}},
+left=12pt,right=12pt,top=8pt,bottom=8pt,
+grow to left by=60pt,
+grow to right by=60pt,
+enlarge top by=10pt,
+enlarge bottom by=10pt,
+breakable,
+enhanced,colframe=red!50!black,frame hidden,myminted/#2,#1}
+
+\mynewminted{python}{python}{python3,tabsize=4,fontsize=\small,baselinestretch=1.0}
+\mynewminted{java}{java}{tabsize=4,fontsize=\small,baselinestretch=1.0}
+\mynewminted{sh}{sh}{tabsize=4,fontsize=\small,baselinestretch=1.0}
+\newmintinline{python}{python3,fontsize=\small,bgcolor=bgcolor}
+\newmintinline{java}{java,fontsize=\small,bgcolor=bgcolor}
+\newmintinline{sh}{sh,fontsize=\small,bgcolor=bgcolor}

@@ -1,0 +1,33 @@
+\RequirePackage{amsmath, amssymb}
+\RequirePackage{mathtools}
+\RequirePackage{enumitem}
+\RequirePackage{float}
+\RequirePackage{fontspec}
+\RequirePackage{hyperref}
+\RequirePackage{setspace}
+\RequirePackage{titlesec}
+
+
+
+\setsansfont[Path=fonts/,BoldFont={Inter-Bold.otf}]{Inter-Regular.otf}
+\newfontfamily{\titlefont}[Path=fonts/]{Inter-ExtraBold.otf}
+
+\def\repo#1{\expandafter\def\expandafter\myrepo{#1}}
+\def\makeinfo{%
+    \begin{center}%
+        \vspace*{-1.2em}%
+        \includegraphics[height=1.6em]{images/GitHub-Mark.png}%
+        \fontsize{11}{24}\selectfont%
+        \kern13pt%
+        \raisebox{5pt}{\url{\myrepo}}%
+    \end{center}%
+    \vspace*{1em}%
+    \setstretch{1.2}%
+    \setlength{\parskip}{1em}%
+}
+
+\titleformat{\section}{\normalfont\sffamily\large}{\raisebox{1pt}{\llap{\thesection.\kern1em}}}{0em}{\Large\bfseries}
+\titleformat{\subsection}{\normalfont\sffamily}{\raisebox{1pt}{\llap{\thesubsection.\kern1em}}}{0em}{\large\bfseries}
+\titleformat{\subsubsection}{\normalfont\sffamily}{\llap{\small\thesubsubsection.\kern1em}}{0em}{\bfseries}
+
+% TODO: fancyhdr
