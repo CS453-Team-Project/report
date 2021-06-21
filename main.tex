@@ -3,27 +3,671 @@
 \usepackage{report}
 \usepackage{codehl}
 \usepackage{lipsum}
+\usepackage{kotex}
+\usepackage{enumitem}
 \usepackage[left=40mm, right=40mm]{geometry}
 
-\title{\Huge\sffamily\titlefont Reinforcing Test Suites\\Using Mutation Testing}
-\author{%
-\sffamily
-First Author, 2nd, third, fourth\\
-\texttt{\normalsize\{fir, sec, thi, fou\}@kaist.ac.kr}
+\title{\Huge\sffamily\titlefont MutRe: Reinforcing Test Suites\\Using Mutation Testing}
+\author{\sffamily%
+20180416 Yeongil Yoon \qquad 20180493 Jung In Rhee \\[0.4em]
+\sffamily%
+20170058 Keonwoo Kim \qquad 20170633 Jaegoo Jho\\[0.6em]
+\texttt{\{askme143, ysrheee, keonwoo, jaegoo1199\}@kaist.ac.kr}
 }
 \date{\sffamily\today}
 \repo{https://github.com/CS453-Team-Project/}
 
+\usepackage{biblatex}
+\addbibresource{main.bib}
 
 \begin{document}
 \maketitle
 \makeinfo
 
+\iffalse
+- 초록
+ - 뮤테이션 테스팅은 테스트 suite의 품질을 확인해볼 수 있는 유용한 테스팅 방법이다.
+ - 그러나 테스트 suite의 품질을 개선하는 데는 사람의 메뉴얼한 노력이 필요하며, 이는 scalable하지 않다.
+ - 따라서 우리는 symbolic execution을 이용해 survived mutant를 자동으로 죽이는 MutRe를 제안한다.
+ - Mutaion의 bytecode와 original code의 symbolic execution 결과를 SMT solver로 풀이하여 mutant를 죽이는 input condition을 알아내고, JUnit 형태의 test code를 제공한다.
+ - Symbolic execution으로 부터 내려온 path explosion 문제가 있지만, 다양한 패턴의 코드를 handle할 수 있음을 확인했다.
+\fi
+\abstract{%
+    Mutation testing is a useful testing method to estimate the quality of a test suite. However, improving the quality of the test suite requires manual human effort, which is not scalable. To address this issue, we suggest \emph{MutRe}, which creates test cases that kills the survived mutants using symbolic execution. MutRe finds out the input condition that kills the mutant by comparing the symbolic execution results of the original code and the mutated code with the SMT solver. MutRe provides generated test cases in a form of JUnit test codes. There is a path explosion problem from symbolic execution, but we have verified that we can handle code of various patterns.
+}
+
+\makeabstract
+
+
 \section{Introduction}
+Mutation testing is a topic of increasing interest not only in laboratory but also in practice\cite{DevelopmentOfMutationTesting}.
+For example, \emph{Pitest} \cite{Pitest} is a mutation testing tool for real Java development teams. The developer can consider modifying the test suite according to the result of the mutation test. If the mutation score is low, which means there are many survived mutants, then the developer will want to modify the test suite. However, the mutation score itself is not helpful for the developer to reinforce the test suite. Therefore, mutation testing tools provide reports which contain more detailed information of mutants, but still the human effort is needed to kill survived mutants. Checking each mutants manually does not scale. The more complex and scaled program would have more test cases and mutants to check.
 
-\lipsum[1]
+Hence, we propose a test generation and reinforcement tool which utilizes mutation testing: \emph{MutRe}. MutRe generates Junit test code for the Java program. Symbolic execution is used to find inputs that produce different results from the original and mutated programs. Test cases made with these inputs can kill the survived mutants. Because we use the output of the current program as a test oracle, MutRe creates a test suite that captures the current program's behavior well. Therefore, MutRe will also be helpful for regression testing.
 
-\begin{listingsbox}{python}{\lipsum[5][1]}
+\iffalse
+- Introduction
+    최대한 이 주제에 관해 넓은 이야기를 하면 좋음.
+    자연스럽게 Motivation으로 이끌어서 주제의 중요성을 어필
+    현재 Mutation testing에서 불편한 점
+    -> symbolic execution을 이용해서 이런 문제를 해결하는 툴을 제안
+    -> 추가로 Regression testing 등에서 유용할 것이라는 예시(discussion에 들어가도 괜찮)
+    앞부분은 https://www.notion.so/Proposal-c289e3fa36454c7dbca1e19d2e135091 참고
+    뒷부분은 final presentation에서 했던 내용
+ - Mutation testing은 많은 software에 적용되고 있으며, 더 많은 real world software에도 적용되고 있다.
+ - 개발자는 mutation testing을 통해 test suite을 평가할 수 있다.
+ - 그러나 test suite을 보강하려면 개발자가 직접 mutation 결과를 검토해야 한다.
+ - 이는 이러한 단점이 있다. (e.g. mutation 수가 많고 software가 복잡할수록 test input을 찾기 어려워진다.)
+ - 따라서 우리는 자동으로 mutation을 kill하는 input을 만드는 MutRe를 제안한다.
+ - MutRe는 Java program을 대상으로 Junit code를 generate한다. 살아남은 mutant에 대해 symbolic execution을 이용해 original program과 mutated program이 다른 결과를 내는 input을 찾는다. 이러한 input으로 만든 test case는 mutant를 kill할 수 있다.
+ - 현재 program의 output을 test oracle로 사용하기 때문에 현재 프로그램의 behavior를 잘 캡쳐하는 test suite을 만든다. 따라서 MutRe는 regression testing에도 유용할 것이다.
+ 
+\fi
+
+\section{Backgrounds}
+\iffalse
+간단하게 mutation testing이랑 RIP conditions에 대해서
+두세 문단 정도면 될 거 같네요
+ - mutation testing 정의, mutation score 설명
+ - RIP condition 설명
+\fi
+\subsection{Mutation Testing}
+Mutation testing is a type of software testing that evaluates test quality by intentionally mutating the code and checking whether the test cases can detect the faults or not. The quality of a test suite is estimated by a mutation score obtained by dividing the number of mutants that found faults by the total number of mutants. If the mute score is low, the developer may consider reinforcing the test suite.
+
+In order for the test suite to kill the mutation, three conditions called RIP conditions must be satisfied: (i) the \emph{reachability condition}, (ii) the \emph{infection condition}, and (iii) the \emph{propagation condition}. The test execution must cover mutated codes. Once the mutated code is executed, it should infect the program state. Also, the infected state should be propagated to an observable result. The developer may find inputs that satisfy RIP conditions and add them into a test suite after mutation testing.
+
+\subsection{Symbolic Execution}
+\iffalse
+1. symbolic execution이 뭔지
+2. 한계
+    path explosion
+3. JBSE에 대해서 쓸 거 있으면 여기 쓰기
+    3.1. Assertion and Assumption
+        3.1.1 Assertion -> \javainline{ass3rt}
+        Assertions specify the conditions that must satisfied for an execution to be correct. JBSE attempts to determine whether some inputs exist that satisfy all the assumptions and make fail at least one assertion. By applying the assertion, exactly ass3rt() function, it is possible to set break line where we want to check whether path condition can reach or not
+        3.1.2 Assumption -> assume
+        Assumptions specify the conditions that must be satisfied for an execution to be relevant for the analysis. If we use assume function, it is possible to refine path condition. This concept can be applied for partially blocking path explosion.
+\fi
+Symbolic execution is a software testing technique to determine what inputs can cover each part of a program. In symbolic execution, symbolic values are used for inputs instead of actual values. Program variables are replaced with symbolic expressions. By executing with symbolic expressions, each execution path produces a input constraint.
+
+The number of feasible paths grows exponentially as the number of conditional statements increases more in the program. Also, there could be infinite paths, such as an unbounded loop. The cost of a symbolic execution can increase significantly. Moreover, the execution will not terminate for the infinite number of paths or paths with infinite depth. This problem is called path explosion. To cope with this problem, many symbolic execution tools have some constraint setting features such as timeout or heap scope settings. 
+
+JBSE \cite{JBSE}, the symbolic execution tool for Java we use in this project, provides features that can limit the explore range: \emph{Assertion} and \emph{Assumption}. \emph{Assertions} specify the conditions that must be satisfied for an execution to be correct. JBSE determines whether the symbolic value satisfies all the assertions or not. By applying the assertion, exactly \javainline{ass3rt()} function, it is possible to set break line where we want to check whether path condition can reach or not. \emph{Assumptions} specify the conditions that must be satisfied for an execution to be relevant for the analysis. If we use assume function, it is possible to refine the path condition. This concept can be applied for partially blocking path explosion.
+
+\subsection{SMT Solver}
+
+The \emph{satisfiability modulo theories} (SMT) problem is a decision in first-order logic with equality with additional background theories \cite{SMT}. Similarly to the \emph{Boolean satisfiability problem} (SAT) solvers, the SMT solvers take a set of clauses to be satisfied and return a satisfying model if the set of clauses is satisfiable, or notifies that the set is unsatisfiable. For instance, we can query to an SMT solver to find a satisfying model of the equations $2x = 6$ and $3y + 2 = 8$ within the integer range $x,y\in\mathbb Z$. Then the SMT solver produces a model $x = 3\land y = 2$.
+
+Z3 \cite{Z3} is one of SMT solvers, developed by Microsoft. It is convenient since it provides APIs to various programming languages, including Python. Moreover, the main theorem prover of JBSE is Z3. Our tool and JBSE both use Z3 to check if a set of path conditions is satisfiable or not.
+
+
+\section{Methods}
+
+\iffalse
+
+간단한 overview
+
+mutant generation -> JBSE -> parse -> get R condition -> assume & JBSE -> parse -> get I condition -> assume & JBSE -> parse -> get P (thus killing) condition -> model generation (Z3) -> human friendly conversion -> junit test case generation
+
+ - MutRe는 survived mutant를 죽이는 test code를 생성한다.
+ - Mutation testing을 실행하여 survived mutant를 추출한다. 각 mutant에 대해 symbolic execution과 SMT solver를 이용하여 RIP condition을 차례대로 구한다. P condition로부터 concrete input을 얻고, test code를 만든다.
+ - MutRe는 Mutation testing을 위해 Pitest를 실행한다. Symbolic execution tool로는 JBSE를 사용한다. Path condition이 satisfiable한 지 계산하고 concrete한 input을 얻어내기 위한 SMT solver로는 Z3 solver를 사용한다.
+\fi
+To generate test code that kills survived mutants, we used a mutation testing tool \emph{Pitest}, a symbolic execution tool \emph{JBSE}, and an SMT solver \emph{Z3}. Additionally, we used \emph{Javassist} for bytecode level manipulation. MutRe runs mutation testing for the program and extracts metadata and bytecodes from each survived mutant. Then MutRe finds RIP conditions gradually with several times of symbolic executions and SMT solver. SMT solver extracts concrete inputs for the propagation condition if the condition is satisfiable. Finally, MutRe generates test cases that kill mutants.
+
+
+\subsection{Executing JBSE and Parsing Outputs}
+
+\iffalse
+JBSE output 구조랑 파싱하는 과정 설명하기
+
+- 각 path의 JBSE output은 아래와 같이 이루어져 잇다 (간단한 path  예시 하나 넣기, symbol naming mention하기)
+  + 그 path에 reach하기 위한 path condition
+  + leaf state of the path (either return a value or raise an exception)
+  + static store
+  + heap
+  + stack
+
+- JBSE output에서 뽑아내려고 하는 information은 어떤 symbol 이 어떤 변수와 대응되는지와 그 symbol들로 표현된 path condition과 path result이다. 이때 correspondence는 path condition의 where clause, stack이나 heap에서 얻을 수 있다.
+\fi
+
+After executing JBSE once, we get a bunch of \emph{paths}, which are of the following form:
+
+\begin{listingsbox}{sh}{The representation of a path in the JBSE output}
+.1.1.1[331]                                            # The name of the path
+Leaf state, raised exception: Object[4330]             # The result (leaf state) of the path
+Path condition:                                        # The path condition of the path
+	{R0} == Object[4326] (fresh) &&
+	{R1} == Object[4327] (fresh) &&
+	{R2} == Object[4329] (fresh) &&
+	({V3}) >= (0) &&
+	(0) >= ({V3})
+	where:                                             # The mapping b/w the symbols and the Java variables                                          # {R*} for references, {V*} for values
+	{R0} == {ROOT}:this &&
+	{R1} == {ROOT}:s &&
+	{R2} == {ROOT}:s.java/lang/String:value &&
+	{V3} == {ROOT}:s.java/lang/String:value.length
+Static store: { ... }                                  # The static store (not in our interests)
+Heap: {                                                # The heap
+	Object[2824]: {
+		Type: (0,[C)
+		Length: 16
+		Items: {"java.lang.String"}
+	}
+    # ...
+}
+Stack: {                                               # An optional stack dump
+	Frame[0]: {
+		Method signature: com/cs453/group5/examples/PriQueue:([II)I:solution
+		Program counter: 111
+		# ...
+	}
+    # ...
+}
+\end{listingsbox}
+
+All information we want to get from the output is the symbol--variable correspondence and path conditions and leaf states written using symbols, which will be used to generate path conditions and leaf states written using variable names only. Therefore, we parsed the output with an emphasis on the types, values, and assigned symbols of variables.
+
+
+
+
+
+
+\subsection{Finding Reachability/Infection Condition}
+
+\iffalse
+Reachability를 찾기위한 과정
+1. mutant에 대한 정보 파싱 -> survived mutants Id
+2. mutation report에 method와 line에 assertion 삽입 -> javassist
+3. run jbse -> parse report(violation 기준)
+4. violation 리포트를 가지고 sovle -> reachability condition!
+
+Infection condtiion을 찾는 과정
+1. reachability condition으로 assume
+2. mutated line 다음에 assume 삽입
+3. 다시 violation을 일으키는 path condition solve
+\fi
+
+In this section, the main point is to extract path condition which can reach the target line. For checking whether a path condition reach or not, the assertion concept of JBSE is used. But in this time, it is essential to insert an assertion codes in byte level, so we also use \emph{Javassist} library. More detailed processes are as follows.
+\subsubsection{Finding Reachability Condition}
+\begin{enumerate}
+    \item Parsing Mutation Report
+    
+    By the result of \emph{Pitest}, it is possible to extract mutation information. Filtering survived mutants and extract information such as mutant id, mutated method and mutated line.
+    \item Insert Assertion before Mutated Line
+    
+    In reachability condition, what we want to do is to extract path condition that can reach the mutated line. We use assertion function for checking reachability. In JBSE, if a path condition fail assertion, then JBSE consider it as violation path.
+    
+    Then, our goal is how to insert fail assertion(\javainline{ass3rt(false)}) in front of mutated line. we can solve this problem by using \emph{Javassist}. By using \emph{Javassist}, it is possible to insert java codes in a specific line number.
+    \item Run JBSE and Extract Violation Path
+    
+    In this step, we just run JBSE to solve the target byte code that we insert assertion in mutated line. From JBSE results, extract the path conditions which JBSE consider as violation path.
+\end{enumerate}
+
+\subsubsection{Finding Infection Condition}
+\begin{enumerate}
+    \item Assume Reachability Condition
+    
+    If we find reachability condition, then now we have to refine the path conditions for finding infection conditions. This issue can be solved by inserting assumption \\
+    (\javainline{assume(<R condition>)}) at the top of the mutated method.
+    \item Insert Assertion after Mutated Line
+    
+    This step is very similar with what we did in previous section. But for finding infection conditions, we concentrate on a path condition can reach the next line of mutated line. In other words, if the path condition pass the mutated condition, we can consider it as infection condition. So, in this time we insert \javainline{assert(false)} after mutated line.
+    \item Run JBSE and Extract Violation Path
+    
+    This is totally same as previous section. Run JBSE and extract violation path. The extracted path conditions are infection conditions.
+\end{enumerate}
+
+
+\subsection{Finding Propagation Condition}
+
+\iffalse
+
+P condition을 찾는 방법
+1. 죽일 mutant code에 해당 mutant에 대해서 위에서 찾은 Reachability/Infection condition을 assumption으로 넣는다(javaassist 이용)
+2. jbse를 돌리면 reachability condition assumption때문에 mutation에 reach하는 모든 path가 찾아진다
+3. 발견된 모든 path를 JBSE output parser를 이용해 파싱한다
+4. original code의 jbse output도 모든 path를 파싱한다
+
+5. mutant의 모든 path와 original code의 모든 path에 대해서 다음과 같은 작업을 한다
+ i) leaf state 비교
+    return값이 다르거나 exception이 raise되었는지 확인한다
+    
+ ii) path condition 비교
+    주어진 두개의 path condition이 겹치는 부분이 있는지 확인해야 한다
+
+  leaf state가 다르다라는 조건(주어진 두개의 result가 모두 return일 경우 - exception이면 신경쓰지않는다 - symbol이 없기 때문), path들의 condition들을 모두 and하고 sat이 가능한지 확인한다.
+
+\fi
+
+This section is about finding the \emph{propagation condition} for a mutant based on \emph{reachability/infection condition} found in section 3.6. By running the JBSE with given \emph{reachability/infection conditions} as assumption, we can get every path that goes through the mutated section. Using the paths found and comparing them with the JBSE result of original code, we can find path conditions that satisfy \emph{propagation condition}. Detailed steps are as follows.
+
+\begin{enumerate}
+    \item Insert assumptions using given conditions
+    
+    Using the Javassist library, insert path-condition-assumption using provided \emph{reachability/infection conditions} to the mutant.
+    
+    \item Run JBSE and parse result
+    
+    Run JBSE with path-condition-assumption inserted mutant. Since the given assumption is \emph{reachability/infection conditions}, JBSE will find all the path that satisfies given conditions.
+    \item Parse JBSE result of the original code
+    
+    To find a path condition that satisfies the \emph{propagation condition}, we should compare the leaf state of the mutant paths with leaf state of original code's paths. So parse all the paths that is generated by running JBSE on original code.
+    \item Compare paths and find propagation condition
+    
+    Now we have (1) information of mutant paths that goes through the mutated section and (2) information of all the paths in original code. We compared leaf state of each paths in (1) with every path in (2) to see if the result of two paths are different. If they are different, we use Z3 to solve the intersection of two path's path conditions, which will be the path condition that satisfies the \emph{propagation condition}.
+    
+    
+\end{enumerate}
+
+
+
+
+
+
+\subsection{Solving Kill Conditions}
+
+\iffalse
+
+kill condition 찾기 위해 했던 고군분투들(variable renaming etc.) 서술하기
+
+
+Z3를 거치면 path condition들이 모두 symbol들로 기술되어 나온다. 그런데 이 symbol은 path에 dependent한 naming이기 때문에, original program의 path와 mutant program의 path의 path condition이나 path result를 단순히 symbol 이름으로만 비교해서는 안 된다. 그렇다고 해서 아예 Z3 variable 이름을 그 실제 변수 이름으로 바꾸면 이름이 같은 shadowing variable등을 처리할 때 문제가 생길 수 있으므로 그럴 수는 없다. 즉 Z3 변수 이름은 symbol 이름으로 유지하되 symbol 이름을 변수 이름으로 바꾸어주는 로직이 필요하고, path condition을 비교하거나 result가 같은지 다른지를 비교할 때에는 반드시 이 로직을 거쳐서 비교해야 한다.
+
+또한 Z3로는 reference variables를 다루지 않으므로 예를 들어 nullity checking과 같은 레벨의 체크 역시 별도로 해주어야 한다.
+
+
+\fi
+
+Finally, we found all the path conditions we need. However, there are two more steps to get usable path conditions: translating symbol names into variable names, and translating Z3 functions into Java functions and operators. The path conditions which Z3 gives us are written using Z3 variables and operators, and hence it cannot be injected into the Java code. One may think of a way to used the actual variable names as symbol names. Unfortunately, this method will probably go wrong when there are multiple distinct variables with common names, such as a variable shadowing another. This will obviously ruin the path condition and result in an uncompilable source code.
+
+There is one more reason why such a translation is required. While we comparing path conditions of two different paths, it is possible for a variable to be assigned with symbols with different names in those paths. For instance, suppose the first path has assigned two variables, \pythoninline{a} to \pythoninline{{V1}} and \pythoninline{b} to \pythoninline{{V2}}, while due to some reasons, the second path does not mention \pythoninline{a} at all and hence only \pythoninline{b} is assigned, to \pythoninline{{V1}}. This shows a path-dependency of symbol naming, and hence to compare two path conditions and leaf states, we need to resolve such an issue by translating symbol names into variable names.
+
+Moreover, Java object types are inappropriate to assign corresponding Z3 variables, and hence typical null checking clauses cannot be processed using Z3. Including those, there are several clauses that do not go well with Z3, so we need to handle them manually. Dealing those conditions with care, we finally have kill conditions in Java syntax.
+
+
+\subsection{Generating Models}
+
+\iffalse
+Kill conditions가 satisfiable 한 경우에 대해 model generation (Z3)
+
+Feasibility condition: string이나array가 너무 길면 human readable하지 않기 때문에 패스 컨디션을 만족하면서 짧은 string이나 array를 선호한다. -> 이런 condition들은 반드시 만족해야 하는 hard clause들은 아니기 때문에 soft clause로 추가하고, 이 (weighted partial) MaxSMT는 Z3의 optimize solver를 이용해 풀 수 있다.
+
+unsatisfiable한 kill condition은 equivalent한 mutant임을 알려줌
+
+satisfiability가 unknown인 clauses를 처리한 방법 서술
+-> unknown이면 주어진 clauses중에서 하나씩 빼가면서 sat이 나올 때까지 check한다
+즉 necessary and sufficient condition을 구할 수 없을 때는 maximal(in the sense of the number of satisfied clauses)한 necessary condition을 구하는 것
+\fi
+
+After we found the kill conditions, the models are generated to make test suite. The model generation is powered by the SMT solver Z3. We provide path condition clauses, which Z3 can handle, and let it produce a satisfying model if possible. However, the output of Z3, even after translating symbol names and operators, usually not appropriate to be used as a test case. The first reason is that Z3 generates enormously large objects such as an array of length 666780685, or a \javainline{java.lang.String} instance of length 1073741824. Unless it is unavoidable to have such a big model, we prefer small and feasible models of which are easier to understand the behaviors. This can be resolved putting those feasibility condition as \emph{soft clauses}, the opposite of \emph{hard clauses}. Hard clauses are one that the model should satisfy, while soft clauses are one that the model does not have to satisfy but it is more preferable to choose a model satisfying soft clauses as many as possible. This kind of problem is called \emph{partial MaxSMT}, as the model is \emph{partially} satisfying the given clauses.
+
+On the other hand, when the kill condition is turned out to be unsatisfiable, then it means that there are no examples (parameters of the method) differentiating two paths, i.e., two paths are equivalent. Therefore, such a pair of paths can be ignored while generating test cases. However, the solver determines the set of clauses to be \emph{undetermined}, which means the solver is too weak to solve the given problem. For example, Z3 cannot provide a solution of $2^x = 4$ where $x\in\mathbb Z$, while it seems very easy to find a solution $x=2$. A workaround to this problem is simply removing those undetermined clauses and find a necessary condition instead. More precisely, when Z3 found a set of clauses undetermined, then we find an example satisfying clauses as many as possible, which becomes a necessary condition to the path condition. Note that in this case, the generated test cases are not guaranteed to differentiate two paths.
+
+
+
+
+
+\subsection{Avoiding Path Explosion}
+
+\iffalse
+언제 Path explosion이 발생하는가?
+1. For, While 반복에 대한 부하가 많은경우(loop의 횟수)
+2. array, String 
+발생하는 문제
+1. Heap이 터진다.
+2. GC가 터진다.
+
+jbse library의 method인 assume을 활용한다.
+- 문제점
+    - 프로그램마다 tool 자체가 적절한 loop횟수를 설정하기가 힘들다.
+- 해결방안
+    - 가정 -> 이건 빼도록 하겠습니다.(써놓고도 이상해서.....)
+        - User(Programmer)는 자신의 프로그램에  대해서 아주 잘 알고 있다? -> 필요한 assumption을 누구보다 정확하세 파악할 수 있는 능력을 보여준다.
+    - User가 customizing을 할 수 있게 허용한다.
+    - (예시를 코드블록으로 보여준다.)
+    - json으로 관련 정보를 받아서 자동으로 assume이 되도록 변형
+- 결과?
+    - 사진을 첨부를 해야하나?
+- 한계 - > Limitation?
+    - JBSE가 계산할 수 있는 loop의 번위가 한정적 -> coding test에서 요구하는 조건의 범위를 충족하기 매우 힘듦
+
+\fi
+
+In general, almost all programs use various kinds of loops, arrays and strings. But the JBSE, wich is very fundamental library of our tool, show a serious problem for calculating symbolic path of such programs. Without any refinement, the JBSE calculate the symbolic path as tight as possible. It means the JBSE can calculate symbolic path infinitely and it will finished when the heap and garbage collection can support those calculations. we call this problem as \emph{Path Explosion}.
+
+To avoid the \emph{Path Explosion}, there is a great concept of \emph{assumption} in JBSE. Simply, to solve this problem we just insert \javainline{assume()} at the top of the method. But it is very hard to insert suitable assumption automatically, because it is really hard to select assumption conditions which can be representative of program features. Rather extracting refinement condition automatically, we allow user to make his/her customized assumptions. 
+
+\begin{listingsbox}{json}{my\_tool\_assume.json}
+[
+    {
+        "class": "com.cs453.group5.examples.Calculator",
+        "assumes": [
+            {
+                "line": 5,
+                "assume": "arr.length <= 3"
+            }
+        ]
+    }
+]
+\end{listingsbox}
+
+For implementing user customized assumption functionality, we give a json file to users. The structure of json file format is like \textsf{\small Code 2}. The user can write down the class which they want to execute in \javainline{"class"} and make their own assumption. In \javainline{"assumes"}, the user have to write down a exact line number and arguments of \javainline{assume()}, the conditions user want to refine. For example, if the user execute the MutRe with assumptions above, the program automatically inserts \javainline{assume(arr.length <= 3)} in line 5 of target class.
+
+\subsection{Converting Data Types}
+
+\iffalse
+path condition을 solve하거나 모델을 구하는 등 많은 작업을 할 때 Z3를 사용해 satisfiability를 검사하거나 해답을 찾는다. Z3만의 독자적인 데이터 타입이 있기 때문에 jbse를 파싱해서 나온 java expression을 그대로 이용할 수가 없고, 따라서 Z3 data type과 java expr사이에서 양방향으로 conversion을 해야 했다.
+
+primitive types에 대해서 Z3 type conversion 서술하기
+-> 여기서 나온 floating point arithmetic, short/float 미지원 이유 서술
+
+i) java -> Z3
+
+Z3의 bitvecval이라는 데이터 타입으로 n-bit의 자료형을 만들 수 있다
+우리는 double을 제외한(float은 미지원) 모든 java data type을 이 bitvecval로 변환해서 사용했다.
+double만 real타입 사용
+
+데이터 변환 과정
+  1) 타입 변환을 처리한다 (widen/narrow 두가지 경우 경우가 있음)
+  2) constant들을 Z3 bitvecval/Z3 real로 변환
+  3) javasymbol들을 Z3 variable로 치환
+
+ii) Z3 -> java
+
+데이터 변환 과정
+  Z3 exprRef의 경우 ast형식으로 되어 있어서 tree를 walk하면서 원래 java type으로 치환한다.
+  1) 타입 변환을 처리한다 
+    expr의 kind, paremeter들을 보고 어떤 타입에서 어떤 타입으로 변환하는 것인지 추론 가능.
+    하지만 java에서는 다른 type conversion인데 Z3에서는 같은 모양으로 생긴 경우가 있어서 이 문제는 겹치는 타입 conversion이 발생하지 않도록 일부 타입을 미지원하도록 함. 문제점에 자세히 서술
+  2) 상수들을 java 상수들로 전환
+  3) parsing을 하면서 만든 symbolmanager을 이용해 Z3 variable을 java variable로 치환
+
+문제점:
+1) floating point arithmetic
+Z3에서 floating point를 다루려면 real이라는 타입 사용해야함. 하지만 floating point에 대한 solving ability가 약하다.
+어쩔수 없다.  -> 정밀한 precision이 필요할 경우 문제가 될 수도 있다
+
+2) 일부 primitive type 미지원
+- short / char bit수 같음
+
+Z3의 bitvec에 sign이 없어서 char/short 구별 불가능. 그래서 위에서 말한 것과 같이 short를 지원하지 않기로 함.
+
+- float / double 구별 불가능
+*F와 *D의 경우 구별이 불가능하다.
+Float와 double 모두를 Z3의 real타입으로 다루려고 했기 때문에 생긴 문제
+
+따라서 float을 지원하지 않기로 함
+
+
+
+\fi
+
+Throughout the program flow, we had to use Z3 many times to solve some satisfiability problems or simplify complicated conditions. The problem is that Z3 has its own data types, we couldn't use the expressions parsed by JBSE directly, which follow the Java syntax. So we had to implement some data conversion method that transforms Java expressions to Z3 expressions and vice versa. This conversion method had led to some limitations of our program, which we will describe in \textsf{\small 5.2 \bfseries Ones Arisen from Converting Data}.
+
+Our tool supports all the Java primitives except \javainline{short} and \javainline{float} (the reason why we do not support these is in \textsf{\small 5.2 \bfseries Ones Arisen from Converting Data}), primitive arrays and Java classes composed of supported primitives.
+Z3 has a special data type \pythoninline{BitVector}, which we can use it to represent integer-like $n$-bit data. MutRe converts all the data types except for \javainline{double} to this \pythoninline{BitVector}, since it has to treat primitive types with different size. For floating point numbers \javainline{double}, we used \pythoninline{Real} to approximate the floating point arithmetic.
+
+
+
+
+
+\subsection{Generating Human-Friendly JUnit Test Suite}
+\iffalse
+1. array나 string, class instances에 대해 Z3 model output을 compact form으로 바꾸는 과정 서술
+
+2. Junit test case로 출력하게 햇다는 거 간단히 서술
+\fi
+
+Finally, we have gathered all the information required to generate a full test suite. Nonetheless, there are remaining works to make the output prettier and more legible. It is impossible to deal with a general class instance without knowing the actual content of constructors, getters, setters, and methods dealing with private fields. Therefore, it is quite a reasonable assumption that \emph{there is only one constructor yielding no parameters} and \emph{every member variable is public}, except the following two kinds of entities: array and strings (an instance of the class \javainline{java.lang.String}.) The most general thing with these is compactifying any nested structure consisting of arrays, strings, and primitive types. Some examples of such structures are \javainline{int[]}, \javainline{java.lang.String[]}, and \javainline{boolean[][]}.
+
+\begin{listingsbox}{java}{Human-friendly form of the input specification}
+// java.lang.String[] arr;
+arr.length = 4;
+arr[0].value.length = 3; arr[0].value[2] = '&';    ======>    arr = ["??&", "_", "", ""];
+arr[2].value.length = 1; arr[2].value[0] = '_';
+
+// boolean[][] z;
+z.length = 3;     z[0].length = 2;                 ======>    z = [[true, false], [], []];
+z[0][0] = true;
+\end{listingsbox}
+The choices of \javainline{'?'}, \javainline{[]}, \javainline{""}, and \javainline{false} are chosen to represent some kinds of emptiness as placeholders, while they can be chosen arbitrarily.
+
+And the inputs generated are converted into JUnit test cases. For each pair of paths, one test case is generated. When the path of the original program returns a value, then the test case is created using \javainline{assertEquals}, and otherwise the test case is created using \javainline{assertThrows}.
+
+
+\begin{listingsbox}{java}{Final JUnit output from MutRe (\pythoninline{NUM_MODELS=4})}
+@Test
+@DisplayName("Original path .1.1.2.1.2.2.2.2.2.2.2.2.2.2[14] (returned 0) <-> Mutant 2's path
+        .1.1.2.2.2.2.1.1.1.1.2.2.2.2.2.2.2[16] (returned 1)")
+public void test66() {
+    com.cs453.group5.examples.TargetNumber myTargetNumber = com.cs453.group5.examples.TargetNumber();
+    
+    int[] numbers;
+    int target;
+    
+    numbers = [-538052432, 1853521015, 591398826];
+    target = 1903393849;
+    assertEquals(myTargetNumber.solution(numbers, target), 0);
+    
+    numbers = [-538052432, 1853521015, 538052432];
+    target = 1903393849;
+    assertEquals(myTargetNumber.solution(numbers, target), 0);
+    
+    numbers = [-176718471, 1073741824, 176718482];
+    target = -1250460295;
+    assertEquals(myTargetNumber.solution(numbers, target), 0);
+    
+    numbers = [-1250722656, -262361, -838303437];
+    target = -1250460295;
+    assertEquals(myTargetNumber.solution(numbers, target), 0);
+}
+\end{listingsbox}
+
+
+
+\section{Evaluations}
+\iffalse
+Calculator 5 survived mutants 5 killed mutants
+Parentheses 12 survived mutants 12 killed mutants
+GreatCommonDivisor 5 survived mutants 4 killed mutants.
+Palindrome 9 survived mutants 7 killed mutants.
+Total 14 survived mutants. Killed 7 mutants.
+- assume json structure
+고질적인 JBSE 문제(path explosion).... 다양한 유형의 프로그램 유형은 단순화시켜 해당유형의 프로그램을 우리의 툴이 해결을 할 수 있는가에 초점을 맞추어 evalution을 진행하엿다.  
+
+core programming 
+We focus on verifying our tool's effectiveness on codes that are simple but contain core features of a programming language
+
+간단한 프로그래밍 구조로부터 점차 난이도 늘림
+JBSE의 heap 부족/GC 터짐 을 알고있기 때문에 loop, recursion 같이 path explosion이 일어나지 않는 단순 분기로만 구성된 프로그램으로 테스트함
+
+
+\fi
+
+Considering the path explosion problem which is inherent to the symbolic execution technique, we couldn't apply our tool to arbitrary programs. Since the problem was inevitable, we chose to focus on verifying that our tool can deal with various patterns that appear frequently while programming. So we chose the most simple examples of three types of patterns: branch, loop, recursion.
+
+\subsection{Branch}
+
+In this section, we choose the samples which doesn't have any loop, recursion and complex data type such as array, string. The typical structure of this category is as follows: 
+
+\begin{listingsbox}{java}{Calculator.java}
+public class Calculator {
+    public int getSign(int number) {
+        int result = 0;
+        if (number > 0) {
+            result = 1;
+        } else if (number < 0) {
+            result = -1;
+        }
+
+        return result;
+    }
+}
+\end{listingsbox}
+
+By executing MutRe on \javainline{Calculator}, among total \textbf{5} survived mutants, we could kill all the \textbf{5} mutants.
+
+We found out that for programs with pure branching patterns, MutRe performs well since there is no path explosion problem.
+
+\subsection{Loop}
+
+The loop is more likely to occur path explosion. In this part, we use user-defined assumption for refinement range of loop. For more details about assumption condition(argument of \javainline{assume()}), you want to refer to MutRe repository. 
+
+\iffalse
+loop는 그냥 돌리면 터진다..
+사용자가 적절한 assume을 넣으면 돌아감
+아래의 코드에 (assume) 넣으면 ?개의 뮤턴트 중에 !개를 죽임
+\fi
+
+\begin{listingsbox}{java}{Palindrome.java}
+public class Palindrome {
+    public int isPalindrome(String string) {
+        int j = string.length() - 1;
+        for (int i = 0; i < string.length() / 2; i++, j--) {
+            if (string.charAt(i) != string.charAt(j)) {
+                return 0;
+            }
+        }
+        return 1;
+    }
+}
+\end{listingsbox}
+
+By executing MutRe, among total \textbf{9} survived mutants, we could kill \textbf{7} mutants.
+
+
+
+\subsection{Recursion}
+\iffalse
+bfs를 사용하는 TargetNumber class는 recursion과 array type을 사용하기 때문에 적절한 assumption 없이는 path explosion이 발생한다.
+
+- 결과: 14개의 뮤턴트 중에 7개를 죽임
+\fi
+
+Lastly, \javainline{TargetNumber} class uses BFS algorithm which is based on recursion, and array type. So it is necessary to use proper assumption for executing MutRe.
+
+\begin{listingsbox}{java}{TargetNumber.java}
+public class TargetNumber {
+    public int solution(int[] numbers, int target) {
+        int answer = 0;
+        answer = bfs(numbers, target, numbers[0], 1) + bfs(numbers, target, -numbers[0], 1);
+        return answer;
+    }
+    public int bfs(int[] numbers, int target, int sum, int i) {
+        if (i == numbers.length) {
+            if (sum == target) {
+                return 1;
+            } else {
+                return 0;
+            }
+        }
+        int result = 0;
+        result += bfs(numbers, target, sum + numbers[i], i + 1);
+        result += bfs(numbers, target, sum - numbers[i], i + 1);
+        return result;
+    }
+}
+\end{listingsbox}
+
+By executing MutRe, among total \textbf{14} survived mutants, we could kill \textbf{7} mutants.
+
+
+
+
+\section{Discussions}
+
+\iffalse
+
+Limitation을 여기서 서술하기(Fianl Presentation)
+- Symbolic execution
+    - Difficult to handle loops and lists
+        - without proper assumption on arguments
+    - Complicated decisions during execution
+        - complicated decisions associated in loops or recursive calls with mutable lists
+        - examples? -> scoville?
+    - Overall performance issues
+        - super heavy test generation tool
+- Converting data type
+    - Cannot differentiate short and char
+    - Impossible to compute floating point numbers
+
+\fi
+
+There are some limitations of our tool. They generally fall into one of two categories:
+\subsection{Ones arisen from Symbolic Execution}
+\begin{enumerate}
+    \item Difficult to handle loops and lists
+    
+    Without proper assumptions on arguments, when the program accesses arbitrary index of a list or when a loop is executed non-constant times. To avoid this, user can use assumption feature of JBSE, but it is also hard to find proper conditions. If the range of refinement increase a little, it can make path explosion anytime. We may avoid this issue using other methods like ones surveyed in \cite{path-explosion}.
+    
+    \item Complicated decisions during execution
+    
+    The second issue from \emph{Symbolic Execution} is complicated decisions during execution. When there are complicated boundaries, usually associated with loops or recursive calls, JBSE traverses all the cases with some codes by mentioning exact value of each array item or loop conditions.
+    
+    \item Overall performance issues
+    
+    MutRe combines several heavy techniques. During whole process, our tool execute mutation testing, symbolic execution for checking RIP conditions, and cross-checking if there are interaction of path conditions of each resulting pair of paths, from original programmed and a mutant returning, different returned values.
+\end{enumerate}
+
+
+\subsection{Ones Arisen from Converting Data}
+\begin{enumerate}
+    \item Cannot differentiate \javainline{short} and \javainline{char}
+    
+    The first one is Z3 cannot differentiate \javainline{short} and \javainline{char}, as their common Z3 type, a bit vector of size 16, has no information about signedness. This may be resolved when we carefully revise the implementation, but we choose to not support short.
+    \item Impossible to compute floating point numbers
+    
+    The second one is that Z3 seldomly solves when there are clauses containing floating point numbers. Z3 actually support the data type but its solving ability is not that good with floating point numbers. Instead of using floating point numbers, we used exact real numbers. This will change the semantics of the program as follows:
+    \begin{itemize}
+        \item Floating point error: \javainline{assertFalse(0.1d + 0.2d == 0.3d)}
+        \item Precision: \javainline{assertTrue(1.0d == 1.0d + 1e-100)}
+        \item Range of representable numbers:\\
+        \javainline{double a; if (a > 4.54e2020 && a < 6.7e2021) throw new Exception();} 
+    \end{itemize}
+    
+    
+\end{enumerate}
+
+
+
+
+
+\section{Conclusions}
+
+\iffalse
+위의 결과로 우리는 mutre가 branch, loop, recursion같은 프로그래밍의 핵심 요소들에 대해서 잘 대응한다는 것을 확인했다. 
+
+Path explosion이라는 큰 문제점 때문에 당장은 활용하기 어려울지라도, 우리는 이번 실험을 통해 Path explosion만 어떻게 해결된다면 우리의 툴이 유용하게 사용될 것이라고 예상한다.
+
+또한 사용자의 manual한 assumption으로 variable space를 줄여 현 상황에서도 활용할 수 있음을 보였다.
+
+
+\fi
+The results above show that our tool performs well for core patterns of programs such as branch, loop, and recursion, when they are properly controlled. Although the path explosion is a quite big problem in \textbf{MutRe}, our experiences show that \textbf{MutRe} can be a very useful tool if we can control the problem well. Also, by applying user-defined assumption system, user can manually reduce the boundaries of variables that JBSE deal with, by applying reasonable assumption on the program's input.
+
+
+
+% References
+\nocite{*}
+\printbibliography
+
+
+\end{document}
+
+
+
+
+
+
+
+코드 블럭 필요하시면 복붙해서 사용하세요
+
+인라인:
+\pythoninline{lambda x: 1 + x}
+\javainline{System.out.println();}
+
+\begin{listingsbox}{python}{제목}
 @dataclass
 class JBSEPath:
     name: str
@@ -34,9 +678,7 @@ class JBSEPath:
     # static_store: TODO
 \end{listingsbox}
 
-\lipsum[2-3]
-
-\begin{listingsbox}{java}{\lipsum[5][2]}
+\begin{listingsbox}{java}{제목}
 public class Calculator {
     public int getSign(int number) {
         int result = 0;
@@ -50,46 +692,3 @@ public class Calculator {
     }
 }
 \end{listingsbox}
-
-\lipsum[4][1-3] \pythoninline{lambda x: 1 + x}
-\lipsum[4][4-7] \pythoninline{lambda x: 1 + x}
-\lipsum[4][8-12]
-
-\section{Backgrounds}
-
-\subsection{\lipsum[5][3]}
-
-\lipsum[6-7]
-
-\subsection{\lipsum[5][4]}
-\subsubsection{\lipsum[5][5]}
-
-\lipsum[9]
-\begin{align*}
-    \psi_n \coloneqq \bigwedge_{1\le j_1<\cdots<j_k\le n} \bigvee_{\substack{1\le a<b\le k \\ 1\le c<d\le k}} (E(p_{j_a},p_{j_b})\land \lnot E(p_{j_c}, p_{j_d})).
-\end{align*}
-\lipsum[10]
-
-
-\section{Methods}
-
-
-
-\section{Results}
-
-
-\section{Discussions}
-
-
-\section{Conclusions}
-
-
-
-\section{Limitations}
-
-
-
-
-
-
-\end{document}

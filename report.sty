@@ -26,8 +26,27 @@
     \setlength{\parskip}{1em}%
 }
 
-\titleformat{\section}{\normalfont\sffamily\large}{\raisebox{1pt}{\llap{\thesection.\kern1em}}}{0em}{\Large\bfseries}
-\titleformat{\subsection}{\normalfont\sffamily}{\raisebox{1pt}{\llap{\thesubsection.\kern1em}}}{0em}{\large\bfseries}
-\titleformat{\subsubsection}{\normalfont\sffamily}{\llap{\small\thesubsubsection.\kern1em}}{0em}{\bfseries}
+\def\abstract#1{\expandafter\long\expandafter\def\expandafter\myabstract{#1}}
+\def\makeabstract{%
+    \begin{center}%
+        \parbox[tc]{\dimexpr\textwidth - 4cm\relax}{
+            \begin{center}
+                \textbf{\large\sffamily Abstract}
+            \end{center}
+    
+            \vspace*{1em}
+
+            \myabstract%
+        }
+    \end{center}%
+    \vspace*{1em}%
+    \setstretch{1.2}%
+    \setlength{\parskip}{1em}%
+}
+
+
+\titleformat{\section}{\normalfont\sffamily\Large}{{\llap{\thesection.\kern1em}}}{0em}{\Large\bfseries}
+\titleformat{\subsection}{\normalfont\sffamily\large}{{\llap{\thesubsection.\kern1em}}}{0em}{\large\bfseries}
+\titleformat{\subsubsection}{\normalfont\sffamily}{\llap{\thesubsubsection.\kern1em}}{0em}{\normalfont\sffamily\bfseries}
 
 % TODO: fancyhdr
